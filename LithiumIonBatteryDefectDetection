@@ -1,0 +1,320 @@
+from __future__ import print_function
+import cv2
+import numpy as np
+from time import sleep
+import cv2 as cv
+import argparse
+import random as rng
+from tensorflow.python.keras.models import load_model
+from tensorflow.python.keras.preprocessing import image
+import matplotlib.pyplot as plt
+from tensorflow.python.keras import backend as K
+import sys
+import time
+
+print('Please wait for Trained Battery Model to Load......! ')
+
+
+print('2 class Model is Loading.....!')
+net_2class = load_model('7_14_Resnet101_Model.h5')
+
+print('4 class Model is Loading.....!')
+net_4class = load_model('9-25_ResNet101_4class.h5')
+
+print('Models are Loaded......! ')
+
+print('Please wait for Camera to start......! ')
+cap = cv2.VideoCapture(1)
+frame_size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+              int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+
+print('Frame Size is '+ str(frame_size))
+print('Frames per second ' + str(cv2.CAP_PROP_FPS))
+
+exit_loop = 100
+
+prevTime = 0
+count = 1
+while True:
+    retval, frame = cap.read()
+    if not retval:
+        break
+
+    curTime = time.time()
+    sec = curTime - prevTime
+    prevTime = curTime
+
+    fps = 1/(sec)
+    F_ps = "FPS : %0.1f" % fps
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(frame, F_ps, (10,400), font, 1, (255, 0, 0), 2, cv2.LINE_AA)
+    cv2.imshow('frame', frame)
+
+    cv2.imwrite("saved_img.jpg", frame)# save frame as JPG file
+
+    print('Showing results for frame ' + str(count))
+
+    count = count +1
+
+###############################################################################
+    ### 1. Cropping Center Part of Image
+    im = cv2.imread('D:/CNN_Projects/object_recognition_detection/Transfer-Learning/saved_img.jpg')
+    size1 = 128;
+    size2 = 224;
+    size3 = 448;
+    size4 = 672;
+    size5 = 896;
+
+    def center_crop(img, new_width=None, new_height=None):        
+        width = img.shape[1]
+        height = img.shape[0]
+
+        if new_width is None:
+             new_width = min(width, height)
+
+        if new_height is None:
+            new_height = min(width, height)
+
+        left = int(np.ceil((width - new_width) / 2))
+        right = width - int(np.floor((width - new_width) / 2))
+
+        top = int(np.ceil((height - new_height) / 2))
+        bottom = height - int(np.floor((height - new_height) / 2))
+
+        if len(img.shape) == 2:
+            center_cropped_img = img[top:bottom, left:right]
+        else:
+            center_cropped_img = img[top:bottom, left:right, ...]
+        return center_cropped_img
+    ###### call center_crop fuction
+    image1 = center_crop(im, size1, size1)
+    img_resized = cv2.imwrite(filename='1.jpg', img=image1)
+
+    #print("Test_img_1 Image saved of size 128*128!")
+
+    image2 = center_crop(im, size2, size2)
+    img_resized = cv2.imwrite(filename='2.jpg', img=image2)
+    #print("Test_img_2 Image saved of size 224*224!")
+
+    image3 = center_crop(im, size3, size3)
+    img_resized = cv2.imwrite(filename='3.jpg', img=image3)
+    #print("Test_img_3 Image saved of sixe 448*448!")
+
+###################################################################################
+### 2. Bounding box function
+    size1_bb = 128;
+    size2_bb = 224;
+    size3_bb = 350;
+
+    def draw_rect(size,scr_img,color):
+        img = cv2.imread(scr_img)
+        height, width, channels = img.shape
+
+        left = int(np.ceil((width - size) / 2))
+        right = width - int(np.floor((width - size) / 2))
+
+        top = int(np.ceil((height - size) / 2))
+        bottom = height - int(np.floor((height - size) / 2))
+
+        upper_left = (left,top)
+        bottom_right = (right,bottom)
+
+        # draw in the image
+        dr_rec=cv2.rectangle(img, upper_left, bottom_right, color, 2)
+
+        return img
+
+    img_draw = 'D:/CNN_Projects/object_recognition_detection/Transfer-Learning/saved_img.jpg'
+
+
+################################################################################
+    ### 3. Prediction code
+    ### For cropped image 1
+    files = sys.argv[1:]
+    files = ['1.jpg']
+
+    cls_list_2 = ['Defect','NoDefect']
+    cls_list_4 = ['Damage','EndRecess','Inked','OverMelting']
+
+    for f in files:
+        img = image.load_img(f, target_size = (224, 224,3))
+        if img is None:
+            continue
+        x = image.img_to_array(img)
+        x = np.expand_dims(x, axis = 0)
+        pred_2 = net_2class.predict(x)[0]
+        top_inds_2 = pred_2.argsort()[::- 1][:5]
+
+        y = image.img_to_array(img)
+        y = np.expand_dims(y, axis = 0)
+        pred_4 = net_4class.predict(y)[0]
+        top_inds_4 = pred_4.argsort()[::- 1][:5]
+
+        print(f)
+
+        if (pred_2[0] < pred_2[1]):
+            rect1 = draw_rect(size1_bb,img_draw,(0,255,0)) ## Green
+            cv2.putText(rect1, 'NoDefect: ' + str(round(pred_2[1]*100))+'%', (256,176), font, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect1)
+        else:
+                if(pred_4[0] < pred_4[1]):
+                    pred_4[0] = pred_4[1]
+                    rect2 = draw_rect(size1_bb,img_draw,(0,0,255)) ## Red
+                    cv2.putText(rect2, 'EndRecess'  + str(round(pred_4[1]*100))+'%' , (256,176), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                    rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+                elif (pred_4[1] < pred_4[2]):
+                      pred_4[1] = pred_4[2]
+                      rect2 = draw_rect(size1_bb,img_draw,(0,0,255)) ## Red
+                      cv2.putText(rect2, 'Inked' + str(round(pred_4[2]*100))+'%' , (256,176), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                      rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+                elif (pred_4[2] < pred_4[3]):
+                      pred_4[2] = pred_4[3]
+                      rect2 = draw_rect(size1_bb,img_draw,(0,0,255)) ## Red
+                      cv2.putText(rect2, 'OverMelting' + str(round(pred_4[3]*100))+'%' , (256,176), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                      rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+                else:
+                      #pred_4[2] = pred_4[3]
+                      rect2 = draw_rect(size1_bb,img_draw,(0,0,255)) ## Red
+                      cv2.putText(rect2, 'Damage' + str(round(pred_4[0]*100))+'%' , (256,176), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                      rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+
+        for i in top_inds_2:  #pred_4[3]
+            print('    {:.3f}  {}'.format(pred_2[i], cls_list_2[i]))
+
+        for i in top_inds_4:
+            print('    {:.3f}  {}'.format(pred_4[i], cls_list_4[i]))
+
+    ### For cropped image 2
+    files = sys.argv[1:]
+    files = ['2.jpg']
+
+    cls_list_2 = ['Defect','NoDefect']
+    cls_list_4 = ['Damage','EndRecess','Inked','OverMelting']
+
+
+    for f in files:
+        img = image.load_img(f, target_size = (224, 224,3))
+        if img is None:
+            continue
+        x = image.img_to_array(img)
+        x = np.expand_dims(x, axis = 0)
+        pred_2 = net_2class.predict(x)[0]
+        top_inds_2 = pred_2.argsort()[::- 1][:5]
+
+        y = image.img_to_array(img)
+        y = np.expand_dims(y, axis = 0)
+        pred_4 = net_4class.predict(y)[0]
+        top_inds_4 = pred_4.argsort()[::- 1][:5]
+
+        print(f)
+
+        if (pred_2[0] < pred_2[1]):
+            rect2 = draw_rect(size2_bb,img_draw,(0,225,0)) ## Green
+            cv2.putText(rect2, 'NoDefect: ' + str(round(pred_2[1]*100))+'%', (208,128), font, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+        else:
+                
+                if(pred_4[0] < pred_4[1]):
+                    pred_4[0] = pred_4[1]
+                    rect2 = draw_rect(size2_bb,img_draw,(0,0,255)) ## Red
+                    cv2.putText(rect2, 'EndRecess'  + str(round(pred_4[1]*100))+'%' , (208,128), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                    rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+                elif (pred_4[1] < pred_4[2]):
+                      pred_4[1] = pred_4[2]
+                      rect2 = draw_rect(size2_bb,img_draw,(0,0,255)) ## Red
+                      cv2.putText(rect2, 'Inked' + str(round(pred_4[2]*100))+'%' , (208,128), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                      rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+                elif (pred_4[2] < pred_4[3]):
+                      pred_4[2] = pred_4[3]
+                      rect2 = draw_rect(size2_bb,img_draw,(0,0,255)) ## Red
+                      cv2.putText(rect2, 'OverMelting' + str(round(pred_4[3]*100))+'%' , (208,128), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                      rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+                else:
+                      #pred_4[2] = pred_4[3]
+                      rect2 = draw_rect(size2_bb,img_draw,(0,0,255)) ## Red
+                      cv2.putText(rect2, 'Damage' + str(round(pred_4[0]*100))+'%' , (208,128), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                      rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+
+
+        for i in top_inds_2:
+            print('    {:.3f}  {}'.format(pred_2[i], cls_list_2[i]))
+
+        for i in top_inds_4:
+            print('    {:.3f}  {}'.format(pred_4[i], cls_list_4[i]))
+
+    ### For cropped image 3
+    files = sys.argv[1:]
+    files = ['3.jpg']
+
+    cls_list_2 = ['Defect','NoDefect']
+    cls_list_4 = ['Damage','EndRecess','Inked','OverMelting']
+
+    for f in files:
+        img = image.load_img(f, target_size = (224, 224,3))
+        if img is None:
+            continue
+        x = image.img_to_array(img)
+        x = np.expand_dims(x, axis = 0)
+        pred_2 = net_2class.predict(x)[0]
+        top_inds_2 = pred_2.argsort()[::- 1][:5]
+
+        y = image.img_to_array(img)
+        y = np.expand_dims(y, axis = 0)
+        pred_4 = net_4class.predict(y)[0]
+        top_inds_4 = pred_4.argsort()[::- 1][:5]
+
+        print(f)
+
+        if (pred_2[0] < pred_2[1]):
+            rect3 = draw_rect(size3_bb,img_draw,(0,255,0)) ## Green
+            cv2.putText(rect3, 'NoDefect: ' + str(round(pred_2[1]*100))+'%', (145,65), font, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect3)
+        else:
+                
+                if(pred_4[0] < pred_4[1]):
+                    pred_4[0] = pred_4[1]
+                    rect2 = draw_rect(size3_bb,img_draw,(0,0,255)) ## Red
+                    cv2.putText(rect2, 'EndRecess'  + str(round(pred_4[1]*100))+'%' , (145,65), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                    rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+                elif (pred_4[1] < pred_4[2]):
+                      pred_4[1] = pred_4[2]
+                      rect2 = draw_rect(size3_bb,img_draw,(0,0,255)) ## Red
+                      cv2.putText(rect2, 'Inked' + str(round(pred_4[2]*100))+'%' , (145,65), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                      rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+                elif (pred_4[2] < pred_4[3]):
+                      pred_4[2] = pred_4[3]
+                      rect2 = draw_rect(size3_bb,img_draw,(0,0,255)) ## Red
+                      cv2.putText(rect2, 'OverMelting' + str(round(pred_4[3]*100))+'%' , (145,65), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                      rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+                else:
+                      #pred_4[2] = pred_4[3]
+                      rect2 = draw_rect(size3_bb,img_draw,(0,0,255)) ## Red
+                      cv2.putText(rect2, 'Damage' + str(round(pred_4[0]*100))+'%' , (145,65), font, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                      rect_save = cv2.imwrite(filename='saved_img.jpg', img=rect2)
+
+        for i in top_inds_2:
+            print('    {:.3f}  {}'.format(pred_2[i], cls_list_2[i]))
+
+        for i in top_inds_4:
+            print('    {:.3f}  {}'.format(pred_4[i], cls_list_4[i]))
+
+    print('Prediction Done')
+#####################################################################################
+    # ### 3. Show the original frame by Creating bounding box around ROI with Prediction result on the image
+
+    img = cv2.imread('saved_img.jpg')
+    cv2.imshow('Defect Detection',img)
+    cv2.waitKey(delay=5) # Delay of 10 ms
+    #cv2.destroyAllWindows()
+
+##################################################################################
+    key = cv2.waitKey(1)
+    if (count == exit_loop+1):#if (key == 'ESC'):#
+        break
+
+if cap.isOpened():
+    cap.release()
+
+cv2.destroyAllWindows()
+###############################################################################
+
