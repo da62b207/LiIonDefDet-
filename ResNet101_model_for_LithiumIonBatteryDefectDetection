@@ -1,0 +1,345 @@
+import numpy as np
+import os
+import time
+import keras
+from keras.applications.resnet50 import  preprocess_input
+from keras.preprocessing import image
+from keras.layers import GlobalAveragePooling2D, Dense, Dropout
+#from keras.layers import GlobalAveragePooling2D, Dense, Dropout,Activation,Flatten
+#from keras.layers import Input
+from keras.models import Model
+from keras.utils import np_utils
+from sklearn.utils import shuffle
+from sklearn.model_selection import train_test_split
+from keras.layers import Input
+from keras import models
+from keras import layers
+from keras import optimizers
+from keras_applications.resnet import ResNet101
+from keras.optimizers import SGD, Adagrad, Adadelta, RMSprop, Adam
+from keras.callbacks import LearningRateScheduler
+from keras.models import load_model
+
+
+###########################################################################################################################
+## Model Initials
+
+IMAGE_SIZE = (224, 224)
+
+
+BATCH_SIZE = 20
+
+
+NUM_EPOCHS = 100
+Next_NUM_EPOCHS = 100
+
+WEIGHTS_FINAL = '7-18_ResNet101_5Class.hdf5'
+MODEL_FINAL = '7-18_ResNet101_5Class.h5'
+BEST_WEIGHT ='7-18_ResNet101_5Class_best.hdf5'
+
+MODEL_FINAL_2 = '7-18_ResNet101_5Class_2.h5'
+WEIGHTS_FINAL_2 = '7-18_ResNet101_5Class_2.hdf5'
+
+###########################################################################################################################
+## Loading dataset for the training process
+## Define data path
+# Loading the training data
+
+img_path = 'D:/CNN_Projects/object_recognition_detection/Transfer-Learning/Damaged.jpg'
+img = image.load_img(img_path, target_size=(224, 224))
+x = image.img_to_array(img)
+print (x.shape)
+x = np.expand_dims(x, axis=0)
+print (x.shape)
+x = preprocess_input(x)
+print('Input image shape:', x.shape)
+
+PATH = os.getcwd()
+
+
+# Define data path
+data_path = 'D:/CNN_Projects/object_recognition_detection/Transfer-Learning/samples'
+data_dir_list = os.listdir(data_path)
+
+img_data_list=[]
+
+for dataset in data_dir_list:
+	img_list=os.listdir(data_path+'/'+ dataset)
+	print ('Loaded the images of dataset-'+'{}\n'.format(dataset))
+	for img in img_list:
+		img_path = data_path + '/'+ dataset + '/'+ img 
+		img = image.load_img(img_path, target_size=(224, 224))
+		x = image.img_to_array(img)
+		x = np.expand_dims(x, axis=0)
+		x = preprocess_input(x)
+		#print('Input image shape:', x.shape)
+		img_data_list.append(x)
+
+img_data = np.array(img_data_list)
+print (img_data.shape)
+img_data=np.rollaxis(img_data,1,0)
+print (img_data.shape)
+img_data=img_data[0]
+print (img_data.shape)
+
+#t=time.time()
+# Define the number of classes
+num_classes = 5
+num_of_samples = img_data.shape[0]
+labels = np.ones((num_of_samples,),dtype='int64')
+
+labels[0:2055]=0
+labels[2056:2748]=1
+labels[2749:5617]=2
+labels[5618:13422]=3
+labels[13423:14533]=4
+
+names = ['Damage','EndRecess','Inked','NoDefect','OverMelting']
+# convert class labels to on-hot encoding
+Y = np_utils.to_categorical(labels, num_classes)
+
+#Shuffle the dataset
+x,y = shuffle(img_data,Y, random_state=2)
+# Split the dataset
+X_train, X_test, y_train, y_test = train_test_split(x, y,
+                                                    test_size=0.2,
+                                                    random_state=2)
+
+#print('Training time: %s' % (t - time.time()))
+epoch=NUM_EPOCHS
+
+###########################################################################################################################
+# Fine tune the resnet 101
+image_input = Input(shape=(224, 224, 3))
+model = ResNet101(include_top=False,
+                        input_tensor=image_input,
+                        weights='imagenet',  
+                        backend=keras.backend,
+                        layers=keras.layers,
+                        models=keras.models,
+                        utils=keras.utils)
+
+# Freeze all the layers
+for layer in model.layers[:-3]:
+    layer.trainable = False
+
+#model.summary()
+
+last_layer = model.output
+# add a global spatial average pooling layer
+x = GlobalAveragePooling2D()(last_layer)
+x = Dense(256, activation='relu',name='fc-1')(x)
+x = Dropout(0.5)(x)
+# a softmax layer for 4 classes
+out = Dense(num_classes, activation='softmax',name='output_layer')(x)
+
+# this is the model we will train
+net_model = Model(inputs=model.input, outputs=out)
+
+net_model.summary()
+
+for layer in net_model.layers[:-5]:
+	layer.trainable = False
+
+net_model.summary()
+
+for layer in net_model.layers:
+    print(layer, layer.trainable)
+
+
+###########################################################################################################################
+####Define learning Rate
+learning_rate = 0.00001
+decay_rate = 0.0#learning_rate / epoch
+momentum = 0.8
+sgd = SGD(lr=learning_rate, momentum=momentum,
+                    decay=decay_rate,
+                     nesterov=False)
+
+##############################################################################
+## we will keep the weights of the epoch that scores highest in terms of accuracy on the test set.
+from keras.callbacks import ModelCheckpoint
+checkpointer = ModelCheckpoint(filepath=BEST_WEIGHT,
+                                monitor = 'val_acc',
+                                verbose=1, 
+                                save_best_only=True,
+                                mode = 'max')
+###################################################################
+
+callback_list = [checkpointer]
+
+net_model.compile(loss='categorical_crossentropy',
+                  optimizer=sgd,
+                  metrics=['accuracy'])
+
+t=time.time()
+hist = net_model.fit(X_train, y_train, batch_size=BATCH_SIZE,
+                     epochs=NUM_EPOCHS, verbose=1,
+                     callbacks = [checkpointer],
+                     validation_data=(X_test, y_test))
+print('Training time: %s' % (time.time()-1))
+(loss, accuracy) = net_model.evaluate(X_test, y_test,
+                                      batch_size=BATCH_SIZE,
+                                      verbose=1)
+
+print("[INFO] loss={:.4f}, accuracy: {:.4f}%".format(loss,accuracy * 100))
+############################################################################################
+## Saving The weights of the model after training
+net_model.save_weights(WEIGHTS_FINAL)
+print('1. Weights Saved')
+net_model.save_weights(BEST_WEIGHT)
+print('2. Best Weights Saved')
+##############################################################################
+## Saving The Complete model after training
+net_model.save(MODEL_FINAL)
+print('3. Model Saved')
+
+############################################################################################
+import matplotlib.pyplot as plt
+# visualizing losses and accuracy
+train_loss=hist.history['loss']
+val_loss=hist.history['val_loss']
+train_acc=hist.history['acc']
+val_acc=hist.history['val_acc']
+xc=range(NUM_EPOCHS)
+
+plt.figure(1,figsize=(7,5))
+plt.plot(xc,train_loss)
+plt.plot(xc,val_loss)
+plt.xlabel('num of Epochs')
+plt.ylabel('loss')
+plt.title('train_loss vs val_loss')
+plt.grid(True)
+plt.legend(['train','val'])
+#print plt.style.available # use bmh, classic,ggplot for big pictures
+plt.style.use(['classic'])
+
+plt.figure(2,figsize=(7,5))
+plt.plot(xc,train_acc)
+plt.plot(xc,val_acc)
+plt.xlabel('num of Epochs')
+plt.ylabel('accuracy')
+plt.title('train_acc vs val_acc')
+plt.grid(True)
+plt.legend(['train','val'],loc=4)
+#print plt.style.available # use bmh, classic,ggplot for big pictures
+plt.style.use(['classic'])
+
+############################################################################################
+#### Train again for next  epochs
+###########################################################################################################################
+####Define learning Rate
+learning_rate = 0.000001
+k = 0.1
+decay_rate = learning_rate * np.exp(-k*Next_NUM_EPOCHS)#
+momentum = 0.8
+sgd_2 = SGD(lr=learning_rate, momentum=momentum,
+                    decay=decay_rate,
+                     nesterov=False)
+##############################################################################
+## we will keep the weights of the epoch that scores highest in terms of accuracy on the test set.
+from keras.callbacks import ModelCheckpoint
+checkpointer = ModelCheckpoint(filepath=BEST_WEIGHT,
+                                monitor = 'val_acc',
+                                verbose=1, 
+                                save_best_only=True,
+                                mode = 'max')
+
+#callback_list = [decay_rate,checkpointer]
+
+net_model2 = load_model('7-18_ResNet101_5Class.h5')
+
+net_model2.compile(loss='categorical_crossentropy',
+                  optimizer=sgd_2,
+                  metrics=['accuracy'])
+
+hist = net_model2.fit(X_train, y_train, batch_size=BATCH_SIZE,
+                     epochs=Next_NUM_EPOCHS, verbose=1,
+                     validation_data=(X_test, y_test))
+print('Training time: %s' % (time.time()-1))
+print('Training time(in mins): %s' % (time.time()-1)*60)
+(loss, accuracy) = net_model2.evaluate(X_test, y_test,
+                                      batch_size=BATCH_SIZE,
+                                      verbose=1)
+
+print("[INFO] loss={:.4f}, accuracy: {:.4f}%".format(loss,accuracy * 100))
+############################################################################################
+## Saving The weights of the model after training
+net_model2.save_weights(WEIGHTS_FINAL_2)
+print('Weights Saved')
+##############################################################################
+## Saving The Complete model after training
+net_model2.save(MODEL_FINAL_2)
+print('Model Saved')
+
+############################################################################################
+import matplotlib.pyplot as plt
+# visualizing losses and accuracy
+train_loss=hist.history['loss']
+val_loss=hist.history['val_loss']
+train_acc=hist.history['acc']
+val_acc=hist.history['val_acc']
+xc=range(Next_NUM_EPOCHS)
+
+plt.figure(1,figsize=(7,5))
+plt.plot(xc,train_loss)
+plt.plot(xc,val_loss)
+plt.xlabel('num of Epochs')
+plt.ylabel('loss')
+plt.title('train_loss vs val_loss')
+plt.grid(True)
+plt.legend(['train','val'])
+#print plt.style.available # use bmh, classic,ggplot for big pictures
+plt.style.use(['classic'])
+
+plt.figure(2,figsize=(7,5))
+plt.plot(xc,train_acc)
+plt.plot(xc,val_acc)
+plt.xlabel('num of Epochs')
+plt.ylabel('accuracy')
+plt.title('train_acc vs val_acc')
+plt.grid(True)
+plt.legend(['train','val'],loc=4)
+#print plt.style.available # use bmh, classic,ggplot for big pictures
+plt.style.use(['classic'])
+
+# ###########################################################################
+from sklearn.metrics import confusion_matrix, classification_report
+import itertools
+from sklearn.utils.multiclass import unique_labels
+from sklearn import metrics
+import seaborn as sns
+
+
+LABELS= ['Damage','EndRecess','Inked','NoDefect','OverMelting']
+
+# Print confusion matrix for training data
+y_pred_train = net_model.predict(X_train)
+
+
+def show_confusion_matrix(validations, predictions):
+
+    matrix = metrics.confusion_matrix(validations, predictions)
+    plt.figure(figsize=(10, 10))
+    sns.heatmap(matrix,
+                cmap='coolwarm',
+                linecolor='white',
+                linewidths=1,
+                xticklabels=LABELS,
+                yticklabels=LABELS,
+                annot=True,
+                fmt='d')
+    plt.title('Confusion Matrix')
+    plt.ylabel('Ground Truth Label')
+    plt.xlabel('Predicted Label')
+    plt.show()
+
+y_pred_test = net_model.predict(X_test)
+# Take the class with the highest probability from the test predictions
+max_y_pred_test = np.argmax(y_pred_test, axis=1)
+max_y_test = np.argmax(y_test, axis=1)
+
+show_confusion_matrix(max_y_test, max_y_pred_test)
+
+print(classification_report(max_y_test, max_y_pred_test))
+##############################################################################
